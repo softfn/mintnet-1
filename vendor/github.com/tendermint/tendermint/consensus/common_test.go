@@ -11,29 +11,36 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/tendermint/go-common"
-	cfg "github.com/tendermint/go-config"
-	dbm "github.com/tendermint/go-db"
-	"github.com/tendermint/go-p2p"
-	bc "github.com/tendermint/tendermint/blockchain"
-	"github.com/tendermint/tendermint/config/tendermint_test"
-	mempl "github.com/tendermint/tendermint/mempool"
-	sm "github.com/tendermint/tendermint/state"
-	"github.com/tendermint/tendermint/types"
 	abcicli "github.com/tendermint/abci/client"
 	abci "github.com/tendermint/abci/types"
+	bc "github.com/tendermint/tendermint/blockchain"
+	cfg "github.com/tendermint/tendermint/config"
+	mempl "github.com/tendermint/tendermint/mempool"
+	"github.com/tendermint/tendermint/p2p"
+	sm "github.com/tendermint/tendermint/state"
+	"github.com/tendermint/tendermint/types"
+	. "github.com/tendermint/tmlibs/common"
+	dbm "github.com/tendermint/tmlibs/db"
+	"github.com/tendermint/tmlibs/log"
 
 	"github.com/tendermint/abci/example/counter"
 	"github.com/tendermint/abci/example/dummy"
+
+	"github.com/go-kit/kit/log/term"
 )
 
-var config cfg.Config // NOTE: must be reset for each _test.go file
-var ensureTimeout = time.Duration(2)
+// genesis, chain_id, priv_val
+var config *cfg.Config // NOTE: must be reset for each _test.go file
+var ensureTimeout = time.Second * 2
 
 func ensureDir(dir string, mode os.FileMode) {
 	if err := EnsureDir(dir, mode); err != nil {
 		panic(err)
 	}
+}
+
+func ResetConfig(name string) *cfg.Config {
+	return cfg.ResetTestRoot(name)
 }
 
 //-------------------------------------------------------------------------------
@@ -64,7 +71,7 @@ func (vs *validatorStub) signVote(voteType byte, hash []byte, header types.PartS
 		Type:             voteType,
 		BlockID:          types.BlockID{hash, header},
 	}
-	err := vs.PrivValidator.SignVote(config.GetString("chain_id"), vote)
+	err := vs.PrivValidator.SignVote(config.ChainID, vote)
 	return vote, err
 }
 
@@ -115,7 +122,7 @@ func decideProposal(cs1 *ConsensusState, vs *validatorStub, height, round int) (
 	// Make proposal
 	polRound, polBlockID := cs1.Votes.POLInfo()
 	proposal = types.NewProposal(height, round, blockParts.Header(), polRound, polBlockID)
-	if err := vs.SignProposal(config.GetString("chain_id"), proposal); err != nil {
+	if err := vs.SignProposal(config.ChainID, proposal); err != nil {
 		panic(err)
 	}
 	return
@@ -205,7 +212,7 @@ func subscribeToVoter(cs *ConsensusState, addr []byte) chan interface{} {
 	go func() {
 		for {
 			v := <-voteCh0
-			vote := v.(types.EventDataVote)
+			vote := v.(types.TMEventData).Unwrap().(types.EventDataVote)
 			// we only fire for our own votes
 			if bytes.Equal(addr, vote.Vote.ValidatorAddress) {
 				voteCh <- v
@@ -215,17 +222,6 @@ func subscribeToVoter(cs *ConsensusState, addr []byte) chan interface{} {
 	return voteCh
 }
 
-func readVotes(ch chan interface{}, reads int) chan struct{} {
-	wg := make(chan struct{})
-	go func() {
-		for i := 0; i < reads; i++ {
-			<-ch // read the precommit event
-		}
-		close(wg)
-	}()
-	return wg
-}
-
 //-------------------------------------------------------------------------------
 // consensus states
 
@@ -233,7 +229,7 @@ func newConsensusState(state *sm.State, pv *types.PrivValidator, app abci.Applic
 	return newConsensusStateWithConfig(config, state, pv, app)
 }
 
-func newConsensusStateWithConfig(thisConfig cfg.Config, state *sm.State, pv *types.PrivValidator, app abci.Application) *ConsensusState {
+func newConsensusStateWithConfig(thisConfig *cfg.Config, state *sm.State, pv *types.PrivValidator, app abci.Application) *ConsensusState {
 	// Get BlockStore
 	blockDB := dbm.NewMemDB()
 	blockStore := bc.NewBlockStore(blockDB)
@@ -244,39 +240,39 @@ func newConsensusStateWithConfig(thisConfig cfg.Config, state *sm.State, pv *typ
 	proxyAppConnCon := abcicli.NewLocalClient(mtx, app)
 
 	// Make Mempool
-	mempool := mempl.NewMempool(thisConfig, proxyAppConnMem)
+	mempool := mempl.NewMempool(thisConfig.Mempool, proxyAppConnMem, 0)
+	mempool.SetLogger(log.TestingLogger().With("module", "mempool"))
+	if thisConfig.Consensus.WaitForTxs() {
+		mempool.EnableTxsAvailable()
+	}
 
 	// Make ConsensusReactor
-	cs := NewConsensusState(thisConfig, state, proxyAppConnCon, blockStore, mempool)
+	cs := NewConsensusState(thisConfig.Consensus, state, proxyAppConnCon, blockStore, mempool)
+	cs.SetLogger(log.TestingLogger())
 	cs.SetPrivValidator(pv)
 
 	evsw := types.NewEventSwitch()
+	evsw.SetLogger(log.TestingLogger().With("module", "events"))
 	cs.SetEventSwitch(evsw)
 	evsw.Start()
 	return cs
 }
 
-func loadPrivValidator(conf cfg.Config) *types.PrivValidator {
-	privValidatorFile := conf.GetString("priv_validator_file")
+func loadPrivValidator(config *cfg.Config) *types.PrivValidator {
+	privValidatorFile := config.PrivValidatorFile()
 	ensureDir(path.Dir(privValidatorFile), 0700)
-	privValidator := types.LoadOrGenPrivValidator(privValidatorFile)
+	privValidator := types.LoadOrGenPrivValidator(privValidatorFile, log.TestingLogger())
 	privValidator.Reset()
 	return privValidator
 }
 
-func fixedConsensusState() *ConsensusState {
-	stateDB := dbm.NewMemDB()
-	state := sm.MakeGenesisStateFromFile(stateDB, config.GetString("genesis_file"))
-	privValidator := loadPrivValidator(config)
-	cs := newConsensusState(state, privValidator, counter.NewCounterApplication(true))
-	return cs
-}
-
 func fixedConsensusStateDummy() *ConsensusState {
 	stateDB := dbm.NewMemDB()
-	state := sm.MakeGenesisStateFromFile(stateDB, config.GetString("genesis_file"))
+	state := sm.MakeGenesisStateFromFile(stateDB, config.GenesisFile())
+	state.SetLogger(log.TestingLogger().With("module", "state"))
 	privValidator := loadPrivValidator(config)
 	cs := newConsensusState(state, privValidator, dummy.NewDummyApplication())
+	cs.SetLogger(log.TestingLogger())
 	return cs
 }
 
@@ -287,6 +283,7 @@ func randConsensusState(nValidators int) (*ConsensusState, []*validatorStub) {
 	vss := make([]*validatorStub, nValidators)
 
 	cs := newConsensusState(state, privVals[0], counter.NewCounterApplication(true))
+	cs.SetLogger(log.TestingLogger())
 
 	for i := 0; i < nValidators; i++ {
 		vss[i] = NewValidatorStub(privVals[i], i)
@@ -300,28 +297,57 @@ func randConsensusState(nValidators int) (*ConsensusState, []*validatorStub) {
 //-------------------------------------------------------------------------------
 
 func ensureNoNewStep(stepCh chan interface{}) {
-	timeout := time.NewTicker(ensureTimeout * time.Second)
+	timer := time.NewTimer(ensureTimeout)
 	select {
-	case <-timeout.C:
+	case <-timer.C:
 		break
 	case <-stepCh:
-		panic("We should be stuck waiting for more votes, not moving to the next step")
+		panic("We should be stuck waiting, not moving to the next step")
+	}
+}
+
+func ensureNewStep(stepCh chan interface{}) {
+	timer := time.NewTimer(ensureTimeout)
+	select {
+	case <-timer.C:
+		panic("We shouldnt be stuck waiting")
+	case <-stepCh:
+		break
 	}
 }
 
 //-------------------------------------------------------------------------------
 // consensus nets
 
-func randConsensusNet(nValidators int, testName string, tickerFunc func() TimeoutTicker, appFunc func() abci.Application) []*ConsensusState {
+// consensusLogger is a TestingLogger which uses a different
+// color for each validator ("validator" key must exist).
+func consensusLogger() log.Logger {
+	return log.TestingLoggerWithColorFn(func(keyvals ...interface{}) term.FgBgColor {
+		for i := 0; i < len(keyvals)-1; i += 2 {
+			if keyvals[i] == "validator" {
+				return term.FgBgColor{Fg: term.Color(uint8(keyvals[i+1].(int) + 1))}
+			}
+		}
+		return term.FgBgColor{}
+	})
+}
+
+func randConsensusNet(nValidators int, testName string, tickerFunc func() TimeoutTicker, appFunc func() abci.Application, configOpts ...func(*cfg.Config)) []*ConsensusState {
 	genDoc, privVals := randGenesisDoc(nValidators, false, 10)
 	css := make([]*ConsensusState, nValidators)
+	logger := consensusLogger()
 	for i := 0; i < nValidators; i++ {
 		db := dbm.NewMemDB() // each state needs its own db
 		state := sm.MakeGenesisState(db, genDoc)
+		state.SetLogger(logger.With("module", "state", "validator", i))
 		state.Save()
-		thisConfig := tendermint_test.ResetConfig(Fmt("%s_%d", testName, i))
-		ensureDir(thisConfig.GetString("cs_wal_dir"), 0700) // dir for wal
+		thisConfig := ResetConfig(Fmt("%s_%d", testName, i))
+		for _, opt := range configOpts {
+			opt(thisConfig)
+		}
+		ensureDir(path.Dir(thisConfig.Consensus.WalFile()), 0700) // dir for wal
 		css[i] = newConsensusStateWithConfig(thisConfig, state, privVals[i], appFunc())
+		css[i].SetLogger(logger.With("validator", i))
 		css[i].SetTimeoutTicker(tickerFunc())
 	}
 	return css
@@ -334,9 +360,10 @@ func randConsensusNetWithPeers(nValidators, nPeers int, testName string, tickerF
 	for i := 0; i < nPeers; i++ {
 		db := dbm.NewMemDB() // each state needs its own db
 		state := sm.MakeGenesisState(db, genDoc)
+		state.SetLogger(log.TestingLogger().With("module", "state"))
 		state.Save()
-		thisConfig := tendermint_test.ResetConfig(Fmt("%s_%d", testName, i))
-		ensureDir(thisConfig.GetString("cs_wal_dir"), 0700) // dir for wal
+		thisConfig := ResetConfig(Fmt("%s_%d", testName, i))
+		ensureDir(path.Dir(thisConfig.Consensus.WalFile()), 0700) // dir for wal
 		var privVal *types.PrivValidator
 		if i < nValidators {
 			privVal = privVals[i]
@@ -347,6 +374,7 @@ func randConsensusNetWithPeers(nValidators, nPeers int, testName string, tickerF
 		}
 
 		css[i] = newConsensusStateWithConfig(thisConfig, state, privVal, appFunc())
+		css[i].SetLogger(log.TestingLogger())
 		css[i].SetTimeoutTicker(tickerFunc())
 	}
 	return css
@@ -379,7 +407,7 @@ func randGenesisDoc(numValidators int, randPower bool, minPower int64) (*types.G
 	sort.Sort(types.PrivValidatorsByAddress(privValidators))
 	return &types.GenesisDoc{
 		GenesisTime: time.Now(),
-		ChainID:     config.GetString("chain_id"),
+		ChainID:     config.ChainID,
 		Validators:  validators,
 	}, privValidators
 }
@@ -388,6 +416,7 @@ func randGenesisState(numValidators int, randPower bool, minPower int64) (*sm.St
 	genDoc, privValidators := randGenesisDoc(numValidators, randPower, minPower)
 	db := dbm.NewMemDB()
 	s0 := sm.MakeGenesisState(db, genDoc)
+	s0.SetLogger(log.TestingLogger().With("module", "state"))
 	s0.Save()
 	return s0, privValidators
 }
@@ -436,6 +465,9 @@ func (m *mockTicker) ScheduleTimeout(ti timeoutInfo) {
 
 func (m *mockTicker) Chan() <-chan timeoutInfo {
 	return m.c
+}
+
+func (mockTicker) SetLogger(log.Logger) {
 }
 
 //------------------------------------

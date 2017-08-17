@@ -1,30 +1,27 @@
 package dummy
 
 import (
-	"encoding/hex"
 	"strings"
 
 	"github.com/tendermint/abci/types"
-	. "github.com/tendermint/go-common"
-	"github.com/tendermint/go-merkle"
-	"github.com/tendermint/go-wire"
+	"github.com/tendermint/merkleeyes/iavl"
+	cmn "github.com/tendermint/tmlibs/common"
+	"github.com/tendermint/tmlibs/merkle"
 )
 
 type DummyApplication struct {
+	types.BaseApplication
+
 	state merkle.Tree
 }
 
 func NewDummyApplication() *DummyApplication {
-	state := merkle.NewIAVLTree(0, nil)
+	state := iavl.NewIAVLTree(0, nil)
 	return &DummyApplication{state: state}
 }
 
 func (app *DummyApplication) Info() (resInfo types.ResponseInfo) {
-	return types.ResponseInfo{Data: Fmt("{\"size\":%v}", app.state.Size())}
-}
-
-func (app *DummyApplication) SetOption(key string, value string) (log string) {
-	return ""
+	return types.ResponseInfo{Data: cmn.Fmt("{\"size\":%v}", app.state.Size())}
 }
 
 // tx is either "key=value" or just arbitrary bytes
@@ -47,15 +44,28 @@ func (app *DummyApplication) Commit() types.Result {
 	return types.NewResultOK(hash, "")
 }
 
-func (app *DummyApplication) Query(query []byte) types.Result {
-	index, value, exists := app.state.Get(query)
-	queryResult := QueryResult{index, string(value), hex.EncodeToString(value), exists}
-	return types.NewResultOK(wire.JSONBytes(queryResult), "")
-}
-
-type QueryResult struct {
-	Index    int    `json:"index"`
-	Value    string `json:"value"`
-	ValueHex string `json:"valueHex"`
-	Exists   bool   `json:"exists"`
+func (app *DummyApplication) Query(reqQuery types.RequestQuery) (resQuery types.ResponseQuery) {
+	if reqQuery.Prove {
+		value, proof, exists := app.state.Proof(reqQuery.Data)
+		resQuery.Index = -1 // TODO make Proof return index
+		resQuery.Key = reqQuery.Data
+		resQuery.Value = value
+		resQuery.Proof = proof
+		if exists {
+			resQuery.Log = "exists"
+		} else {
+			resQuery.Log = "does not exist"
+		}
+		return
+	} else {
+		index, value, exists := app.state.Get(reqQuery.Data)
+		resQuery.Index = int64(index)
+		resQuery.Value = value
+		if exists {
+			resQuery.Log = "exists"
+		} else {
+			resQuery.Log = "does not exist"
+		}
+		return
+	}
 }

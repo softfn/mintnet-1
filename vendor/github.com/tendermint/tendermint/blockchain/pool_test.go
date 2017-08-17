@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/tendermint/go-common"
 	"github.com/tendermint/tendermint/types"
+	. "github.com/tendermint/tmlibs/common"
+	"github.com/tendermint/tmlibs/log"
 )
 
 func init() {
@@ -34,7 +35,9 @@ func TestBasic(t *testing.T) {
 	timeoutsCh := make(chan string, 100)
 	requestsCh := make(chan BlockRequest, 100)
 	pool := NewBlockPool(start, requestsCh, timeoutsCh)
+	pool.SetLogger(log.TestingLogger())
 	pool.Start()
+	defer pool.Stop()
 
 	// Introduce each peer.
 	go func() {
@@ -64,7 +67,7 @@ func TestBasic(t *testing.T) {
 		case peerID := <-timeoutsCh:
 			t.Errorf("timeout: %v", peerID)
 		case request := <-requestsCh:
-			log.Info("TEST: Pulled new BlockRequest", "request", request)
+			t.Logf("Pulled new BlockRequest %v", request)
 			if request.Height == 300 {
 				return // Done!
 			}
@@ -72,12 +75,10 @@ func TestBasic(t *testing.T) {
 			go func() {
 				block := &types.Block{Header: &types.Header{Height: request.Height}}
 				pool.AddBlock(request.PeerID, block, 123)
-				log.Info("TEST: Added block", "block", request.Height, "peer", request.PeerID)
+				t.Logf("Added block from peer %v (height: %v)", request.PeerID, request.Height)
 			}()
 		}
 	}
-
-	pool.Stop()
 }
 
 func TestTimeout(t *testing.T) {
@@ -86,10 +87,12 @@ func TestTimeout(t *testing.T) {
 	timeoutsCh := make(chan string, 100)
 	requestsCh := make(chan BlockRequest, 100)
 	pool := NewBlockPool(start, requestsCh, timeoutsCh)
+	pool.SetLogger(log.TestingLogger())
 	pool.Start()
+	defer pool.Stop()
 
 	for _, peer := range peers {
-		log.Info("Peer", "id", peer.id)
+		t.Logf("Peer %v", peer.id)
 	}
 
 	// Introduce each peer.
@@ -120,7 +123,7 @@ func TestTimeout(t *testing.T) {
 	for {
 		select {
 		case peerID := <-timeoutsCh:
-			log.Info("Timeout", "peerID", peerID)
+			t.Logf("Peer %v timeouted", peerID)
 			if _, ok := timedOut[peerID]; !ok {
 				counter++
 				if counter == len(peers) {
@@ -128,9 +131,7 @@ func TestTimeout(t *testing.T) {
 				}
 			}
 		case request := <-requestsCh:
-			log.Info("TEST: Pulled new BlockRequest", "request", request)
+			t.Logf("Pulled new BlockRequest %+v", request)
 		}
 	}
-
-	pool.Stop()
 }

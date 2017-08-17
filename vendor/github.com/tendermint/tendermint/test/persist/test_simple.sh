@@ -1,15 +1,15 @@
 #! /bin/bash
 
 
-export TMROOT=$HOME/.tendermint_persist
+export TMHOME=$HOME/.tendermint_persist
 
-rm -rf $TMROOT
+rm -rf $TMHOME
 tendermint init
 
 function start_procs(){
 	name=$1
 	echo "Starting persistent dummy and tendermint"
-	dummy --persist $TMROOT/dummy &> "dummy_${name}.log" &
+	dummy --persist $TMHOME/dummy &> "dummy_${name}.log" &
 	PID_DUMMY=$!
 	tendermint node &> tendermint_${name}.log &
 	PID_TENDERMINT=$!
@@ -57,11 +57,11 @@ while [ "$ERR" != 0 ]; do
 done
 
 # wait for a new block
-h1=`curl -s $addr/status | jq .result[1].latest_block_height`
+h1=`curl -s $addr/status | jq .result.latest_block_height`
 h2=$h1
 while [ "$h2" == "$h1" ]; do
 	sleep 1
-	h2=`curl -s $addr/status | jq .result[1].latest_block_height`
+	h2=`curl -s $addr/status | jq .result.latest_block_height`
 done
 
 kill_procs

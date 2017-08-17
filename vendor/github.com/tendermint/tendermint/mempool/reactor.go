@@ -6,13 +6,13 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/tendermint/go-clist"
-	. "github.com/tendermint/go-common"
-	cfg "github.com/tendermint/go-config"
-	"github.com/tendermint/go-p2p"
-	"github.com/tendermint/go-wire"
-	"github.com/tendermint/tendermint/types"
 	abci "github.com/tendermint/abci/types"
+	wire "github.com/tendermint/go-wire"
+	"github.com/tendermint/tmlibs/clist"
+
+	cfg "github.com/tendermint/tendermint/config"
+	"github.com/tendermint/tendermint/p2p"
+	"github.com/tendermint/tendermint/types"
 )
 
 const (
@@ -25,21 +25,23 @@ const (
 // MempoolReactor handles mempool tx broadcasting amongst peers.
 type MempoolReactor struct {
 	p2p.BaseReactor
-	config  cfg.Config
+	config  *cfg.MempoolConfig
 	Mempool *Mempool
 	evsw    types.EventSwitch
 }
 
-func NewMempoolReactor(config cfg.Config, mempool *Mempool) *MempoolReactor {
+// NewMempoolReactor returns a new MempoolReactor with the given config and mempool.
+func NewMempoolReactor(config *cfg.MempoolConfig, mempool *Mempool) *MempoolReactor {
 	memR := &MempoolReactor{
 		config:  config,
 		Mempool: mempool,
 	}
-	memR.BaseReactor = *p2p.NewBaseReactor(log, "MempoolReactor", memR)
+	memR.BaseReactor = *p2p.NewBaseReactor("MempoolReactor", memR)
 	return memR
 }
 
-// Implements Reactor
+// GetChannels implements Reactor.
+// It returns the list of channels for this reactor.
 func (memR *MempoolReactor) GetChannels() []*p2p.ChannelDescriptor {
 	return []*p2p.ChannelDescriptor{
 		&p2p.ChannelDescriptor{
@@ -49,50 +51,54 @@ func (memR *MempoolReactor) GetChannels() []*p2p.ChannelDescriptor {
 	}
 }
 
-// Implements Reactor
+// AddPeer implements Reactor.
+// It starts a broadcast routine ensuring all txs are forwarded to the given peer.
 func (memR *MempoolReactor) AddPeer(peer *p2p.Peer) {
 	go memR.broadcastTxRoutine(peer)
 }
 
-// Implements Reactor
+// RemovePeer implements Reactor.
 func (memR *MempoolReactor) RemovePeer(peer *p2p.Peer, reason interface{}) {
 	// broadcast routine checks if peer is gone and returns
 }
 
-// Implements Reactor
+// Receive implements Reactor.
+// It adds any received transactions to the mempool.
 func (memR *MempoolReactor) Receive(chID byte, src *p2p.Peer, msgBytes []byte) {
 	_, msg, err := DecodeMessage(msgBytes)
 	if err != nil {
-		log.Warn("Error decoding message", "error", err)
+		memR.Logger.Error("Error decoding message", "err", err)
 		return
 	}
-	log.Debug("Receive", "src", src, "chId", chID, "msg", msg)
+	memR.Logger.Debug("Receive", "src", src, "chId", chID, "msg", msg)
 
 	switch msg := msg.(type) {
 	case *TxMessage:
 		err := memR.Mempool.CheckTx(msg.Tx, nil)
 		if err != nil {
 			// Bad, seen, or conflicting tx.
-			log.Info("Could not add tx", "tx", msg.Tx)
+			memR.Logger.Info("Could not add tx", "tx", msg.Tx)
 			return
 		} else {
-			log.Info("Added valid tx", "tx", msg.Tx)
+			memR.Logger.Info("Added valid tx", "tx", msg.Tx)
 		}
 		// broadcasting happens from go routines per peer
 	default:
-		log.Warn(Fmt("Unknown message type %v", reflect.TypeOf(msg)))
+		memR.Logger.Error(fmt.Sprintf("Unknown message type %v", reflect.TypeOf(msg)))
 	}
 }
 
-// Just an alias for CheckTx since broadcasting happens in peer routines
+// BroadcastTx is an alias for Mempool.CheckTx. Broadcasting itself happens in peer routines.
 func (memR *MempoolReactor) BroadcastTx(tx types.Tx, cb func(*abci.Response)) error {
 	return memR.Mempool.CheckTx(tx, cb)
 }
 
+// PeerState describes the state of a peer.
 type PeerState interface {
 	GetHeight() int
 }
 
+// Peer describes a peer.
 type Peer interface {
 	IsRunning() bool
 	Send(byte, interface{}) bool
@@ -103,7 +109,7 @@ type Peer interface {
 // TODO: Handle mempool or reactor shutdown?
 // As is this routine may block forever if no new txs come in.
 func (memR *MempoolReactor) broadcastTxRoutine(peer Peer) {
-	if !memR.config.GetBool("mempool_broadcast") {
+	if !memR.config.Broadcast {
 		return
 	}
 
@@ -141,7 +147,7 @@ func (memR *MempoolReactor) broadcastTxRoutine(peer Peer) {
 	}
 }
 
-// implements events.Eventable
+// SetEventSwitch implements events.Eventable.
 func (memR *MempoolReactor) SetEventSwitch(evsw types.EventSwitch) {
 	memR.evsw = evsw
 }
@@ -153,6 +159,7 @@ const (
 	msgTypeTx = byte(0x01)
 )
 
+// MempoolMessage is a message sent or received by the MempoolReactor.
 type MempoolMessage interface{}
 
 var _ = wire.RegisterInterface(
@@ -160,6 +167,7 @@ var _ = wire.RegisterInterface(
 	wire.ConcreteType{&TxMessage{}, msgTypeTx},
 )
 
+// DecodeMessage decodes a byte-array into a MempoolMessage.
 func DecodeMessage(bz []byte) (msgType byte, msg MempoolMessage, err error) {
 	msgType = bz[0]
 	n := new(int)
@@ -170,10 +178,12 @@ func DecodeMessage(bz []byte) (msgType byte, msg MempoolMessage, err error) {
 
 //-------------------------------------
 
+// TxMessage is a MempoolMessage containing a transaction.
 type TxMessage struct {
 	Tx types.Tx
 }
 
+// String returns a string representation of the TxMessage.
 func (m *TxMessage) String() string {
 	return fmt.Sprintf("[TxMessage %v]", m.Tx)
 }

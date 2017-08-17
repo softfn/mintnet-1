@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"sync"
 
-	. "github.com/tendermint/go-common"
 	"github.com/tendermint/abci/types"
+	cmn "github.com/tendermint/tmlibs/common"
 )
 
 type Client interface {
-	Service
+	cmn.Service
 
 	SetResponseCallback(Callback)
 	Error() error
@@ -20,7 +20,7 @@ type Client interface {
 	SetOptionAsync(key string, value string) *ReqRes
 	DeliverTxAsync(tx []byte) *ReqRes
 	CheckTxAsync(tx []byte) *ReqRes
-	QueryAsync(tx []byte) *ReqRes
+	QueryAsync(reqQuery types.RequestQuery) *ReqRes
 	CommitAsync() *ReqRes
 
 	FlushSync() error
@@ -29,7 +29,7 @@ type Client interface {
 	SetOptionSync(key string, value string) (res types.Result)
 	DeliverTxSync(tx []byte) (res types.Result)
 	CheckTxSync(tx []byte) (res types.Result)
-	QuerySync(tx []byte) (res types.Result)
+	QuerySync(reqQuery types.RequestQuery) (resQuery types.ResponseQuery, err error)
 	CommitSync() (res types.Result)
 
 	InitChainAsync(validators []*types.Validator) *ReqRes
@@ -43,15 +43,16 @@ type Client interface {
 
 //----------------------------------------
 
+// NewClient returns a new ABCI client of the specified transport type.
+// It returns an error if the transport is not "socket" or "grpc"
 func NewClient(addr, transport string, mustConnect bool) (client Client, err error) {
 	switch transport {
 	case "socket":
-		client, err = NewSocketClient(addr, mustConnect)
+		client = NewSocketClient(addr, mustConnect)
 	case "grpc":
-		client, err = NewGRPCClient(addr, mustConnect)
+		client = NewGRPCClient(addr, mustConnect)
 	default:
 		err = fmt.Errorf("Unknown abci transport %s", transport)
-
 	}
 	return
 }

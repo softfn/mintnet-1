@@ -2,14 +2,15 @@ package core
 
 import (
 	"fmt"
-	. "github.com/tendermint/go-common"
+
 	ctypes "github.com/tendermint/tendermint/rpc/core/types"
 	"github.com/tendermint/tendermint/types"
+	. "github.com/tendermint/tmlibs/common"
 )
 
 //-----------------------------------------------------------------------------
 
-// TODO: limit/permission on (max - min)
+// Returns at most 20 blocks
 func BlockchainInfo(minHeight, maxHeight int) (*ctypes.ResultBlockchainInfo, error) {
 	if maxHeight == 0 {
 		maxHeight = blockStore.Height()
@@ -18,8 +19,11 @@ func BlockchainInfo(minHeight, maxHeight int) (*ctypes.ResultBlockchainInfo, err
 	}
 	if minHeight == 0 {
 		minHeight = MaxInt(1, maxHeight-20)
+	} else {
+		minHeight = MaxInt(minHeight, maxHeight-20)
 	}
-	log.Debug("BlockchainInfoHandler", "maxHeight", maxHeight, "minHeight", minHeight)
+
+	logger.Debug("BlockchainInfoHandler", "maxHeight", maxHeight, "minHeight", minHeight)
 
 	blockMetas := []*types.BlockMeta{}
 	for height := maxHeight; height >= minHeight; height-- {
@@ -43,4 +47,29 @@ func Block(height int) (*ctypes.ResultBlock, error) {
 	blockMeta := blockStore.LoadBlockMeta(height)
 	block := blockStore.LoadBlock(height)
 	return &ctypes.ResultBlock{blockMeta, block}, nil
+}
+
+//-----------------------------------------------------------------------------
+
+func Commit(height int) (*ctypes.ResultCommit, error) {
+	if height == 0 {
+		return nil, fmt.Errorf("Height must be greater than 0")
+	}
+	storeHeight := blockStore.Height()
+	if height > storeHeight {
+		return nil, fmt.Errorf("Height must be less than or equal to the current blockchain height")
+	}
+
+	header := blockStore.LoadBlockMeta(height).Header
+
+	// If the next block has not been committed yet,
+	// use a non-canonical commit
+	if height == storeHeight {
+		commit := blockStore.LoadSeenCommit(height)
+		return &ctypes.ResultCommit{header, commit, false}, nil
+	}
+
+	// Return the canonical commit (comes from the block at height+1)
+	commit := blockStore.LoadBlockCommit(height)
+	return &ctypes.ResultCommit{header, commit, true}, nil
 }

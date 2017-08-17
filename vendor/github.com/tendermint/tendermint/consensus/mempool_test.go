@@ -5,15 +5,90 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tendermint/tendermint/config/tendermint_test"
-	"github.com/tendermint/tendermint/types"
 	abci "github.com/tendermint/abci/types"
+	"github.com/tendermint/tendermint/types"
 
-	. "github.com/tendermint/go-common"
+	. "github.com/tendermint/tmlibs/common"
 )
 
 func init() {
-	config = tendermint_test.ResetConfig("consensus_mempool_test")
+	config = ResetConfig("consensus_mempool_test")
+}
+
+func TestNoProgressUntilTxsAvailable(t *testing.T) {
+	config := ResetConfig("consensus_mempool_txs_available_test")
+	config.Consensus.CreateEmptyBlocks = false
+	state, privVals := randGenesisState(1, false, 10)
+	cs := newConsensusStateWithConfig(config, state, privVals[0], NewCounterApplication())
+	cs.mempool.EnableTxsAvailable()
+	height, round := cs.Height, cs.Round
+	newBlockCh := subscribeToEvent(cs.evsw, "tester", types.EventStringNewBlock(), 1)
+	startTestRound(cs, height, round)
+
+	ensureNewStep(newBlockCh) // first block gets committed
+	ensureNoNewStep(newBlockCh)
+	deliverTxsRange(cs, 0, 2)
+	ensureNewStep(newBlockCh) // commit txs
+	ensureNewStep(newBlockCh) // commit updated app hash
+	ensureNoNewStep(newBlockCh)
+
+}
+
+func TestProgressAfterCreateEmptyBlocksInterval(t *testing.T) {
+	config := ResetConfig("consensus_mempool_txs_available_test")
+	config.Consensus.CreateEmptyBlocksInterval = int(ensureTimeout.Seconds())
+	state, privVals := randGenesisState(1, false, 10)
+	cs := newConsensusStateWithConfig(config, state, privVals[0], NewCounterApplication())
+	cs.mempool.EnableTxsAvailable()
+	height, round := cs.Height, cs.Round
+	newBlockCh := subscribeToEvent(cs.evsw, "tester", types.EventStringNewBlock(), 1)
+	startTestRound(cs, height, round)
+
+	ensureNewStep(newBlockCh)   // first block gets committed
+	ensureNoNewStep(newBlockCh) // then we dont make a block ...
+	ensureNewStep(newBlockCh)   // until the CreateEmptyBlocksInterval has passed
+}
+
+func TestProgressInHigherRound(t *testing.T) {
+	config := ResetConfig("consensus_mempool_txs_available_test")
+	config.Consensus.CreateEmptyBlocks = false
+	state, privVals := randGenesisState(1, false, 10)
+	cs := newConsensusStateWithConfig(config, state, privVals[0], NewCounterApplication())
+	cs.mempool.EnableTxsAvailable()
+	height, round := cs.Height, cs.Round
+	newBlockCh := subscribeToEvent(cs.evsw, "tester", types.EventStringNewBlock(), 1)
+	newRoundCh := subscribeToEvent(cs.evsw, "tester", types.EventStringNewRound(), 1)
+	timeoutCh := subscribeToEvent(cs.evsw, "tester", types.EventStringTimeoutPropose(), 1)
+	cs.setProposal = func(proposal *types.Proposal) error {
+		if cs.Height == 2 && cs.Round == 0 {
+			// dont set the proposal in round 0 so we timeout and
+			// go to next round
+			cs.Logger.Info("Ignoring set proposal at height 2, round 0")
+			return nil
+		}
+		return cs.defaultSetProposal(proposal)
+	}
+	startTestRound(cs, height, round)
+
+	ensureNewStep(newRoundCh) // first round at first height
+	ensureNewStep(newBlockCh) // first block gets committed
+	ensureNewStep(newRoundCh) // first round at next height
+	deliverTxsRange(cs, 0, 2) // we deliver txs, but dont set a proposal so we get the next round
+	<-timeoutCh
+	ensureNewStep(newRoundCh) // wait for the next round
+	ensureNewStep(newBlockCh) // now we can commit the block
+}
+
+func deliverTxsRange(cs *ConsensusState, start, end int) {
+	// Deliver some txs.
+	for i := start; i < end; i++ {
+		txBytes := make([]byte, 8)
+		binary.BigEndian.PutUint64(txBytes, uint64(i))
+		err := cs.mempool.CheckTx(txBytes, nil)
+		if err != nil {
+			panic(Fmt("Error after CheckTx: %v", err))
+		}
+	}
 }
 
 func TestTxConcurrentWithCommit(t *testing.T) {
@@ -23,28 +98,15 @@ func TestTxConcurrentWithCommit(t *testing.T) {
 	height, round := cs.Height, cs.Round
 	newBlockCh := subscribeToEvent(cs.evsw, "tester", types.EventStringNewBlock(), 1)
 
-	deliverTxsRange := func(start, end int) {
-		// Deliver some txs.
-		for i := start; i < end; i++ {
-			txBytes := make([]byte, 8)
-			binary.BigEndian.PutUint64(txBytes, uint64(i))
-			err := cs.mempool.CheckTx(txBytes, nil)
-			if err != nil {
-				panic(Fmt("Error after CheckTx: %v", err))
-			}
-			//	time.Sleep(time.Microsecond * time.Duration(rand.Int63n(3000)))
-		}
-	}
-
 	NTxs := 10000
-	go deliverTxsRange(0, NTxs)
+	go deliverTxsRange(cs, 0, NTxs)
 
 	startTestRound(cs, height, round)
 	ticker := time.NewTicker(time.Second * 20)
 	for nTxs := 0; nTxs < NTxs; {
 		select {
 		case b := <-newBlockCh:
-			nTxs += b.(types.EventDataNewBlock).Block.Header.NumTxs
+			nTxs += b.(types.TMEventData).Unwrap().(types.EventDataNewBlock).Block.Header.NumTxs
 		case <-ticker.C:
 			panic("Timed out waiting to commit blocks with transactions")
 		}
@@ -81,15 +143,12 @@ func TestRmBadTx(t *testing.T) {
 		// check for the tx
 		for {
 			time.Sleep(time.Second)
-			select {
-			case <-ch:
-			default:
-				txs := cs.mempool.Reap(1)
-				if len(txs) == 0 {
-					ch <- struct{}{}
-				}
-
+			txs := cs.mempool.Reap(1)
+			if len(txs) == 0 {
+				ch <- struct{}{}
+				return
 			}
+
 		}
 	}()
 
@@ -114,6 +173,8 @@ func TestRmBadTx(t *testing.T) {
 
 // CounterApplication that maintains a mempool state and resets it upon commit
 type CounterApplication struct {
+	abci.BaseApplication
+
 	txCount        int
 	mempoolTxCount int
 }
@@ -124,10 +185,6 @@ func NewCounterApplication() *CounterApplication {
 
 func (app *CounterApplication) Info() abci.ResponseInfo {
 	return abci.ResponseInfo{Data: Fmt("txs:%v", app.txCount)}
-}
-
-func (app *CounterApplication) SetOption(key string, value string) (log string) {
-	return ""
 }
 
 func (app *CounterApplication) DeliverTx(tx []byte) abci.Result {
@@ -159,8 +216,4 @@ func (app *CounterApplication) Commit() abci.Result {
 		binary.BigEndian.PutUint64(hash, uint64(app.txCount))
 		return abci.NewResultOK(hash, "")
 	}
-}
-
-func (app *CounterApplication) Query(query []byte) abci.Result {
-	return abci.NewResultOK(nil, Fmt("Query is not supported"))
 }

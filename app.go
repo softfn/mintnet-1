@@ -12,7 +12,8 @@ import (
 	"time"
 
 	. "github.com/tendermint/go-common"
-	client "github.com/tendermint/go-rpc/client"
+	client "github.com/tendermint/tendermint/rpc/client"
+	"github.com/tendermint/tendermint/rpc/lib/client"
 	"github.com/tendermint/go-wire"
 	ctypes "github.com/tendermint/tendermint/rpc/core/types"
 
@@ -330,15 +331,14 @@ func startTMCore(mach, app string, seeds []string, randomPort, noTMSP bool, imag
 
 			// get pubkey from rpc endpoint
 			// try a few times in case the rpc server is slow to start
-			var result ctypes.TMResult
 			for i := 0; i < 10; i++ {
 				time.Sleep(time.Second)
-				c := client.NewClientURI(fmt.Sprintf("%s", coreInfo.RPCAddr))
-				if _, err = c.Call("status", nil, &result); err != nil {
+				c := client.NewHTTP(fmt.Sprintf("%s", coreInfo.RPCAddr), "/websocket")
+				status, err := c.Status()
+				if err != nil {
 					fmt.Println(Yellow(Fmt("Error getting rpc status for %v: %v", coreInfo.RPCAddr, err)))
 					continue
 				}
-				status := result.(*ctypes.ResultStatus)
 				coreInfo.Validator.PubKey = status.PubKey
 				break
 			}
@@ -353,8 +353,8 @@ func startTMCore(mach, app string, seeds []string, randomPort, noTMSP bool, imag
 }
 
 func dialSeeds(rpcAddr string, seeds []string) error {
-	var result ctypes.TMResult
-	c := client.NewClientURI(fmt.Sprintf("%s", rpcAddr))
+	result := new(ctypes.ResultDialSeeds)
+	c := rpcclient.NewJSONRPCClient(fmt.Sprintf("%s", rpcAddr))
 	args := map[string]interface{}{"seeds": seeds}
 	_, err := c.Call("dial_seeds", args, &result)
 	if err != nil {

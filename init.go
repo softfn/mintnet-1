@@ -139,7 +139,7 @@ func cmdChainInit(c *cli.Context) {
 			genVals[i] = tmtypes.GenesisValidator{
 				Name:   val.ID,
 				PubKey: val.PubKey,
-				Amount: 1, // TODO
+				Amount: 10, // TODO
 			}
 		}
 	} else {
@@ -156,7 +156,7 @@ func cmdChainInit(c *cli.Context) {
 			privVal := tmtypes.LoadPrivValidator(privValFile)
 			genVals[i] = tmtypes.GenesisValidator{
 				PubKey: privVal.PubKey,
-				Amount: 1,
+				Amount: 10,
 				Name:   mach,
 			}
 		}
@@ -321,7 +321,7 @@ git checkout $BRANCH
 make get_vendor_deps
 make install
 
-tendermint node --seeds="$TMSEEDS" --moniker="$TMNAME" --proxy_app="$PROXYAPP"`)
+tendermint node --p2p.seeds="$TMSEEDS" --moniker="$TMNAME" --proxy_app="$PROXYAPP"`)
 
 	err = WriteFile(path.Join(dir, "init.sh"), scriptBytes, 0777)
 	return err

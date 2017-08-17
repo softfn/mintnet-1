@@ -1,15 +1,19 @@
 package types
 
+import (
+	"github.com/tendermint/go-wire/data"
+)
+
 // canonical json is go-wire's json for structs with fields in alphabetical order
 
 type CanonicalJSONBlockID struct {
-	Hash        []byte                     `json:"hash,omitempty"`
+	Hash        data.Bytes                 `json:"hash,omitempty"`
 	PartsHeader CanonicalJSONPartSetHeader `json:"parts,omitempty"`
 }
 
 type CanonicalJSONPartSetHeader struct {
-	Hash  []byte `json:"hash"`
-	Total int    `json:"total"`
+	Hash  data.Bytes `json:"hash"`
+	Total int        `json:"total"`
 }
 
 type CanonicalJSONProposal struct {
@@ -27,6 +31,14 @@ type CanonicalJSONVote struct {
 	Type    byte                 `json:"type"`
 }
 
+type CanonicalJSONHeartbeat struct {
+	Height           int        `json:"height"`
+	Round            int        `json:"round"`
+	Sequence         int        `json:"sequence"`
+	ValidatorAddress data.Bytes `json:"validator_address"`
+	ValidatorIndex   int        `json:"validator_index"`
+}
+
 //------------------------------------
 // Messages including a "chain id" can only be applied to one chain, hence "Once"
 
@@ -38,6 +50,11 @@ type CanonicalJSONOnceProposal struct {
 type CanonicalJSONOnceVote struct {
 	ChainID string            `json:"chain_id"`
 	Vote    CanonicalJSONVote `json:"vote"`
+}
+
+type CanonicalJSONOnceHeartbeat struct {
+	ChainID   string                 `json:"chain_id"`
+	Heartbeat CanonicalJSONHeartbeat `json:"heartbeat"`
 }
 
 //-----------------------------------
@@ -73,5 +90,15 @@ func CanonicalVote(vote *Vote) CanonicalJSONVote {
 		vote.Height,
 		vote.Round,
 		vote.Type,
+	}
+}
+
+func CanonicalHeartbeat(heartbeat *Heartbeat) CanonicalJSONHeartbeat {
+	return CanonicalJSONHeartbeat{
+		heartbeat.Height,
+		heartbeat.Round,
+		heartbeat.Sequence,
+		heartbeat.ValidatorAddress,
+		heartbeat.ValidatorIndex,
 	}
 }

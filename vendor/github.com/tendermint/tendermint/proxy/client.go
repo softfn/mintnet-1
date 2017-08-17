@@ -1,13 +1,12 @@
 package proxy
 
 import (
-	"fmt"
 	"sync"
 
-	cfg "github.com/tendermint/go-config"
+	"github.com/pkg/errors"
+
 	abcicli "github.com/tendermint/abci/client"
 	"github.com/tendermint/abci/example/dummy"
-	nilapp "github.com/tendermint/abci/example/nil"
 	"github.com/tendermint/abci/types"
 )
 
@@ -53,10 +52,9 @@ func NewRemoteClientCreator(addr, transport string, mustConnect bool) ClientCrea
 }
 
 func (r *remoteClientCreator) NewABCIClient() (abcicli.Client, error) {
-	// Run forever in a loop
 	remoteApp, err := abcicli.NewClient(r.addr, r.transport, r.mustConnect)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to connect to proxy: %v", err)
+		return nil, errors.Wrap(err, "Failed to connect to proxy")
 	}
 	return remoteApp, nil
 }
@@ -64,17 +62,14 @@ func (r *remoteClientCreator) NewABCIClient() (abcicli.Client, error) {
 //-----------------------------------------------------------------
 // default
 
-func DefaultClientCreator(config cfg.Config) ClientCreator {
-	addr := config.GetString("proxy_app")
-	transport := config.GetString("abci")
-
+func DefaultClientCreator(addr, transport, dbDir string) ClientCreator {
 	switch addr {
 	case "dummy":
 		return NewLocalClientCreator(dummy.NewDummyApplication())
 	case "persistent_dummy":
-		return NewLocalClientCreator(dummy.NewPersistentDummyApplication(config.GetString("db_dir")))
+		return NewLocalClientCreator(dummy.NewPersistentDummyApplication(dbDir))
 	case "nilapp":
-		return NewLocalClientCreator(nilapp.NewNilApplication())
+		return NewLocalClientCreator(types.NewBaseApplication())
 	default:
 		mustConnect := false // loop retrying
 		return NewRemoteClientCreator(addr, transport, mustConnect)

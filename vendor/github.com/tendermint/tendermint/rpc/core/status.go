@@ -1,6 +1,7 @@
 package core
 
 import (
+	data "github.com/tendermint/go-wire/data"
 	ctypes "github.com/tendermint/tendermint/rpc/core/types"
 	"github.com/tendermint/tendermint/types"
 )
@@ -9,13 +10,13 @@ func Status() (*ctypes.ResultStatus, error) {
 	latestHeight := blockStore.Height()
 	var (
 		latestBlockMeta *types.BlockMeta
-		latestBlockHash []byte
-		latestAppHash   []byte
+		latestBlockHash data.Bytes
+		latestAppHash   data.Bytes
 		latestBlockTime int64
 	)
 	if latestHeight != 0 {
 		latestBlockMeta = blockStore.LoadBlockMeta(latestHeight)
-		latestBlockHash = latestBlockMeta.Hash
+		latestBlockHash = latestBlockMeta.BlockID.Hash
 		latestAppHash = latestBlockMeta.Header.AppHash
 		latestBlockTime = latestBlockMeta.Header.Time.UnixNano()
 	}
@@ -26,5 +27,6 @@ func Status() (*ctypes.ResultStatus, error) {
 		LatestBlockHash:   latestBlockHash,
 		LatestAppHash:     latestAppHash,
 		LatestBlockHeight: latestHeight,
-		LatestBlockTime:   latestBlockTime}, nil
+		LatestBlockTime:   latestBlockTime,
+		Syncing:           consensusReactor.FastSync()}, nil
 }

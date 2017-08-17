@@ -2,18 +2,17 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"time"
 
-	. "github.com/tendermint/go-common"
-	"github.com/tendermint/go-process"
-	"github.com/tendermint/abci/client"
+	abcicli "github.com/tendermint/abci/client"
 	"github.com/tendermint/abci/types"
+	"github.com/tendermint/tmlibs/log"
+	"github.com/tendermint/tmlibs/process"
 )
 
-//----------------------------------------
-
-func StartApp(abciApp string) *process.Process {
+func startApp(abciApp string) *process.Process {
 	// Start the app
 	//outBuf := NewBufferCloser(nil)
 	proc, err := process.StartProcess("abci_app",
@@ -33,60 +32,66 @@ func StartApp(abciApp string) *process.Process {
 	return proc
 }
 
-func StartClient(abciType string) abcicli.Client {
+func startClient(abciType string) abcicli.Client {
 	// Start client
 	client, err := abcicli.NewClient("tcp://127.0.0.1:46658", abciType, true)
 	if err != nil {
+		panic(err.Error())
+	}
+	logger := log.NewTMLogger(log.NewSyncWriter(os.Stdout))
+	client.SetLogger(logger.With("module", "abcicli"))
+	if _, err := client.Start(); err != nil {
 		panic("connecting to abci_app: " + err.Error())
 	}
+
 	return client
 }
 
-func SetOption(client abcicli.Client, key, value string) {
+func setOption(client abcicli.Client, key, value string) {
 	res := client.SetOptionSync(key, value)
 	_, _, log := res.Code, res.Data, res.Log
 	if res.IsErr() {
-		panic(Fmt("setting %v=%v: \nlog: %v", key, value, log))
+		panic(fmt.Sprintf("setting %v=%v: \nlog: %v", key, value, log))
 	}
 }
 
-func Commit(client abcicli.Client, hashExp []byte) {
+func commit(client abcicli.Client, hashExp []byte) {
 	res := client.CommitSync()
 	_, data, log := res.Code, res.Data, res.Log
 	if res.IsErr() {
-		panic(Fmt("committing %v\nlog: %v", log))
+		panic(fmt.Sprintf("committing %v\nlog: %v", log))
 	}
 	if !bytes.Equal(res.Data, hashExp) {
-		panic(Fmt("Commit hash was unexpected. Got %X expected %X",
+		panic(fmt.Sprintf("Commit hash was unexpected. Got %X expected %X",
 			data, hashExp))
 	}
 }
 
-func DeliverTx(client abcicli.Client, txBytes []byte, codeExp types.CodeType, dataExp []byte) {
+func deliverTx(client abcicli.Client, txBytes []byte, codeExp types.CodeType, dataExp []byte) {
 	res := client.DeliverTxSync(txBytes)
 	code, data, log := res.Code, res.Data, res.Log
 	if code != codeExp {
-		panic(Fmt("DeliverTx response code was unexpected. Got %v expected %v. Log: %v",
+		panic(fmt.Sprintf("DeliverTx response code was unexpected. Got %v expected %v. Log: %v",
 			code, codeExp, log))
 	}
 	if !bytes.Equal(data, dataExp) {
-		panic(Fmt("DeliverTx response data was unexpected. Got %X expected %X",
+		panic(fmt.Sprintf("DeliverTx response data was unexpected. Got %X expected %X",
 			data, dataExp))
 	}
 }
 
-func CheckTx(client abcicli.Client, txBytes []byte, codeExp types.CodeType, dataExp []byte) {
+func checkTx(client abcicli.Client, txBytes []byte, codeExp types.CodeType, dataExp []byte) {
 	res := client.CheckTxSync(txBytes)
 	code, data, log := res.Code, res.Data, res.Log
 	if res.IsErr() {
-		panic(Fmt("checking tx %X: %v\nlog: %v", txBytes, log))
+		panic(fmt.Sprintf("checking tx %X: %v\nlog: %v", txBytes, log))
 	}
 	if code != codeExp {
-		panic(Fmt("CheckTx response code was unexpected. Got %v expected %v. Log: %v",
+		panic(fmt.Sprintf("CheckTx response code was unexpected. Got %v expected %v. Log: %v",
 			code, codeExp, log))
 	}
 	if !bytes.Equal(data, dataExp) {
-		panic(Fmt("CheckTx response data was unexpected. Got %X expected %X",
+		panic(fmt.Sprintf("CheckTx response data was unexpected. Got %X expected %X",
 			data, dataExp))
 	}
 }
