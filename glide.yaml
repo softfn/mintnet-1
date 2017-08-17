@@ -1,0 +1,18 @@
+package: github.com/tendermint/mintnet
+import:
+- package: github.com/codegangsta/cli
+- package: github.com/tendermint/go-common
+  version: develop
+- package: github.com/tendermint/go-crypto
+  version: develop
+- package: github.com/tendermint/go-process
+  version: develop
+- package: github.com/tendermint/go-rpc
+  version: develop
+- package: github.com/tendermint/go-wire
+  version: develop
+- package: github.com/tendermint/tendermint
+  version: develop
+  subpackages:
+  - rpc/core/types
+  - types
