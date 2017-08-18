@@ -380,20 +380,20 @@ func initCoreDirectory(base string) error {
 # Edit this script before "mintnet start" to change
 # the core blockchain engine.
 
-TMREPO="github.com/tendermint/tendermint"
-BRANCH="master"
+#TMREPO="github.com/tendermint/tendermint"
+#BRANCH="master"
 
-go get -d $TMREPO/cmd/tendermint
+#go get -d $TMREPO/cmd/tendermint
 ### DEPENDENCIES (example)
 # cd $GOPATH/src/github.com/tendermint/tmsp
 # git fetch origin $BRANCH
 # git checkout $BRANCH
 ### DEPENDENCIES END
-cd $GOPATH/src/$TMREPO
-git fetch origin $BRANCH
-git checkout $BRANCH
-make get_vendor_deps
-make install
+#cd $GOPATH/src/$TMREPO
+#git fetch origin $BRANCH
+#git checkout $BRANCH
+#make get_vendor_deps
+#make install
 
 tendermint node --p2p.seeds="$TMSEEDS" --moniker="$TMNAME" --proxy_app="$PROXYAPP"`)
 
