@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"path"
 	"time"
@@ -10,6 +11,7 @@ import (
 	. "github.com/tendermint/go-common"
 	"github.com/tendermint/go-wire"
 	tmtypes "github.com/tendermint/tendermint/types"
+	cmn "github.com/tendermint/tmlibs/common"
 )
 
 //--------------------------------------------------------------------------------
@@ -130,8 +132,26 @@ func cmdChainInit(c *cli.Context) {
 			// overwrite the priv validator
 			privValFile := path.Join(valSetDir, val.ID, "priv_validator.json")
 			privVal := tmtypes.LoadPrivValidator(privValFile)
-			privVal.SetFile(path.Join(base, mach, "core", "priv_validator.json"))
-			privVal.Save()
+			//privVal.SetFile(path.Join(base, mach, "core", "priv_validator.json"))
+			//privVal.Save()
+			
+			privValBytes, err := json.Marshal(privVal)
+        		if err != nil {
+				Exit(err.Error())
+        		}
+
+			var object interface{}
+        		err = json.Unmarshal(privValBytes, &object)
+        		if err != nil {
+				Exit(err.Error())
+        		}
+
+        		jsonBytes, err := json.MarshalIndent(object, "", "\t")
+        		if err != nil {
+				Exit(err.Error())
+        		}
+
+        		cmn.WriteFile(path.Join(base, mach, "core", "priv_validator.json"), jsonBytes, 0644)
 		}
 
 		// copy the vals into genVals
@@ -172,12 +192,48 @@ func cmdChainInit(c *cli.Context) {
 
 	// Write genesis file.
 	for _, mach := range machines {
-		genDoc.SaveAs(path.Join(base, mach, "core", "genesis.json"))
+		//genDoc.SaveAs(path.Join(base, mach, "core", "genesis.json"))
+
+		genDocBytes, err := json.Marshal(genDoc)
+        	if err != nil {
+			Exit(err.Error())
+        	}
+	
+		var object interface{}
+        	err = json.Unmarshal(genDocBytes, &object)
+        	if err != nil {
+			Exit(err.Error())
+        	}
+
+        	jsonBytes, err := json.MarshalIndent(object, "", "\t")
+        	if err != nil {
+			Exit(err.Error())
+        	}
+
+        	cmn.WriteFile(path.Join(base, mach, "core", "genesis.json"), jsonBytes, 0644)
 	}
 
 	// Write genesis file.
 	for _, mach := range machines {
-		genDoc.SaveAs(path.Join(base, mach, "core", "genesis.json"))
+		//genDoc.SaveAs(path.Join(base, mach, "core", "genesis.json"))
+
+		genDocBytes, err := json.Marshal(genDoc)
+        	if err != nil {
+			Exit(err.Error())
+        	}
+	
+		var object interface{}
+        	err = json.Unmarshal(genDocBytes, &object)
+        	if err != nil {
+			Exit(err.Error())
+        	}
+
+        	jsonBytes, err := json.MarshalIndent(object, "", "\t")
+        	if err != nil {
+			Exit(err.Error())
+        	}
+
+        	cmn.WriteFile(path.Join(base, mach, "core", "genesis.json"), jsonBytes, 0644)
 	}
 
 	// write the chain meta data (ie. validator set name and validators)
@@ -196,7 +252,7 @@ func cmdChainInit(c *cli.Context) {
 	if err != nil {
 		Exit(err.Error())
 	}
-
+	
 	fmt.Println(Fmt("Successfully initialized %v node directories", len(machines)))
 }
 
@@ -232,8 +288,26 @@ func ensurePrivValidator(file string) {
 		return
 	}
 	privValidator := tmtypes.GenPrivValidator()
-	privValidator.SetFile(file)
-	privValidator.Save()
+	//privValidator.SetFile(file)
+	//privValidator.Save()
+	
+	privValidatorBytes, err := json.Marshal(privValidator)
+        if err != nil {
+		Exit(err.Error())
+        }
+
+	var object interface{}
+        err = json.Unmarshal(privValidatorBytes, &object)
+        if err != nil {
+		Exit(err.Error())
+        }
+
+        jsonBytes, err := json.MarshalIndent(object, "", "\t")
+        if err != nil {
+		Exit(err.Error())
+        }
+
+        cmn.WriteFile(file, jsonBytes, 0644)
 }
 
 // Initialize common data directory
