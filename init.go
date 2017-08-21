@@ -375,7 +375,7 @@ func initCoreDirectory(base string) error {
 	}
 
 	// Write a silly sample bash script.
-	scriptBytes := []byte(`#! /bin/bash
+	/*scriptBytes := []byte(`#! /bin/bash
 # This is a sample bash script for tendermint core
 # Edit this script before "mintnet start" to change
 # the core blockchain engine.
@@ -394,7 +394,8 @@ func initCoreDirectory(base string) error {
 #git checkout $BRANCH
 #make get_vendor_deps
 #make install
-
+*/
+	scriptBytes := []byte(`#! /bin/bash
 blockchain node --p2p.seeds="$TMSEEDS" --moniker="$TMNAME" --proxy_app="$PROXYAPP"`)
 
 	err = WriteFile(path.Join(dir, "init.sh"), scriptBytes, 0777)
