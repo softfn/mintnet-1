@@ -396,7 +396,7 @@ func initCoreDirectory(base string) error {
 #make install
 */
 	scriptBytes := []byte(`#! /bin/bash
-blockchain node --p2p.seeds="$TMSEEDS" --moniker="$TMNAME" --proxy_app="$PROXYAPP"`)
+tendermint node --p2p.seeds="$TMSEEDS" --moniker="$TMNAME" --proxy_app="$PROXYAPP"`)
 
 	err = WriteFile(path.Join(dir, "init.sh"), scriptBytes, 0777)
 	return err
